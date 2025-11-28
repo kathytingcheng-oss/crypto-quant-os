@@ -1,0 +1,6 @@
+streamlit
+pandas
+plotly
+supabase
+ccxt
+extra_streamlit_components
