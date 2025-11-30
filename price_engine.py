@@ -329,3 +329,22 @@ class TaxCalculator:
                         buy_lot['qty'] -= matched
                         if buy_lot['qty'] <= 0.00000001: queue.popleft()
         return realized_pnl, tax_events
+
+# ==========================================
+# 6. 交易记录管理 (删除与清空) - 新增
+# ==========================================
+def delete_transaction(supabase_client, transaction_id):
+    """删除单条交易记录"""
+    try:
+        supabase_client.table("transactions").delete().eq("id", transaction_id).execute()
+        return True, "Deleted"
+    except Exception as e:
+        return False, str(e)
+
+def clear_all_transactions(supabase_client, user_id):
+    """清空该用户的所有交易历史"""
+    try:
+        supabase_client.table("transactions").delete().eq("user_id", user_id).execute()
+        return True, "All history cleared"
+    except Exception as e:
+        return False, str(e)

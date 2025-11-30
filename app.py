@@ -240,30 +240,112 @@ def main_app():
             st.plotly_chart(fig, use_container_width=True)
     
     # --- Tax Engine ---
-    # --- Tax Engine ---
     st.markdown("---"); st.markdown("### 🏛 THE TAX ENGINE")
     
+    # 1. 录入区 (修复报错显示)
     with st.expander("➕ Manual Tax Record"):
         with st.form("t_rec"):
             cc1, cc2, cc3, cc4 = st.columns(4)
             tt = cc1.selectbox("TYPE", ["BUY", "SELL"])
             ts = cc2.text_input("SYM", "BTC").upper()
-            
-            # ✅ Changed to text_input for free typing
             tq_str = cc3.text_input("QTY", value="0.0000")
             tp_str = cc4.text_input("PRICE ($)", value="0.00")
-            
             td = st.date_input("DATE", datetime.date.today())
             
             if st.form_submit_button("ADD"):
+                # 第一步：先检查数字格式
                 try:
-                    # Convert string to float safely
                     tq = float(tq_str)
                     tp = float(tp_str)
+                except ValueError:
+                    st.error("❌ 格式错误：请输入纯数字 (例如 0.002)")
+                    st.stop() # 停止执行，不进入下一步
+                
+                # 第二步：尝试写入数据库 (捕获真实错误)
+                try:
                     price_engine.add_transaction(supabase, user.id, ts, tt, tq, tp, td)
-                    st.success("Recorded"); time.sleep(0.5); st.rerun()
-                except:
-                    st.error("Invalid Number")
+                    st.success("Recorded")
+                    time.sleep(0.5); st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Database Error: {e}")
+
+    # 2. 获取数据
+    tx_df = price_engine.get_transaction_history(supabase, user.id)
+    
+    if not tx_df.empty:
+        # 计算税务
+        calc = price_engine.TaxCalculator()
+        realized, events = calc.calculate(tx_df)
+        
+        # 顶部功能栏：清空按钮
+        col_info, col_clear = st.columns([3, 1])
+        with col_info:
+            st.markdown(f"**REALIZED P&L:** <span style='color:{'#00ff41' if realized>0 else '#ff003c'}'>${realized:,.2f}</span>", unsafe_allow_html=True)
+        with col_clear:
+            if st.button("🗑️ CLEAR HISTORY"):
+                price_engine.clear_all_transactions(supabase, user.id)
+                st.success("Cleared"); time.sleep(0.5); st.rerun()
+
+        # 选项卡展示
+        tab_tax, tab_ledger = st.tabs(["💰 REALIZED P&L (Tax Events)", "📜 FULL LEDGER (Manage)"])
+        
+        # Tab 1: 税务事件 (只显示卖出结果)
+        with tab_tax:
+            if events:
+                for e in reversed(events[-5:]):
+                    c = "#00ff41" if e['term']=="LONG" else "#ff003c"
+                    tag = "LONG TERM" if e['term']=="LONG" else "SHORT TERM"
+                    st.markdown(f"""
+                    <div style="background:#161b22; border-left:4px solid {c}; padding:15px; margin-bottom:10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                        <div><span style="color:{c}; font-weight:bold">SOLD</span> <span style="color:#fff; font-weight:bold; margin-left:10px;">{e['symbol']} ({e['qty']:.4f})</span></div>
+                        <div><span style="background:{c}; color:#000; padding:2px 8px; border-radius:2px; font-weight:bold; font-size:0.8rem; margin-right:15px;">{tag}</span><span style="color:#8b949e">Gain:</span> <span style="color:{c}; font-weight:bold">${e['gain']:,.2f}</span></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("No taxable events yet (You haven't sold anything).")
+
+        # Tab 2: 完整账本 (带删除功能！)
+        with tab_ledger:
+            st.caption("Click 'X' to delete a specific record.")
+            
+            # 遍历显示每一条记录，并加一个删除按钮
+            # 为了美观，我们用 st.columns 来模拟表格
+            
+            # 表头
+            h1, h2, h3, h4, h5, h6 = st.columns([2, 1, 1, 2, 2, 1])
+            h1.markdown("**Date**")
+            h2.markdown("**Type**")
+            h3.markdown("**Asset**")
+            h4.markdown("**Qty**")
+            h5.markdown("**Price**")
+            h6.markdown("**Action**")
+            st.divider()
+
+            # 列表内容 (倒序显示，最新的在上面)
+            # 注意：iterrows 性能较差，但对于几十条记录没问题
+            for index, row in tx_df.sort_values('timestamp', ascending=False).iterrows():
+                c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1, 2, 2, 1])
+                
+                # 格式化日期
+                ts_str = pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d')
+                
+                c1.write(ts_str)
+                c2.write(row['type'])
+                c3.write(row['symbol'])
+                c4.write(f"{float(row['quantity']):.4f}")
+                c5.write(f"${float(row['price']):,.2f}")
+                
+                # 删除按钮 (使用唯一的 key 防止冲突)
+                if c6.button("❌", key=f"del_{row['id']}"):
+                    price_engine.delete_transaction(supabase, row['id'])
+                    st.toast("Deleted"); time.sleep(0.5); st.rerun()
+            
+    else:
+        st.info("No transaction history. Add a record above.")
+
+    time.sleep(2)
+    st.rerun()
+
 
 if __name__ == "__main__":
     if st.session_state.user: main_app()
