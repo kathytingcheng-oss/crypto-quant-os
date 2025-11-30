@@ -9,7 +9,7 @@ import price_engine
 import ccxt
 
 # ==========================================
-# 1. 页面配置与 CSS (高对比度 + 深色模式)
+# 1. 页面配置与 CSS
 # ==========================================
 st.set_page_config(page_title="CRYPTO QUANT OS", layout="wide", initial_sidebar_state="expanded")
 
@@ -17,49 +17,24 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Roboto+Mono:wght@400;700&display=swap');
 
-    /* 全局深色主题 */
     .stApp { background-color: #05070a; color: #e0f7ff; font-family: 'Roboto Mono', monospace; }
-    
-    /* 侧边栏 */
     [data-testid="stSidebar"] { background-color: #0b0f15; border-right: 1px solid #30363d; }
 
-    /* 按钮：强制霓虹绿底黑字 */
     .stButton > button {
-        background-color: #00ff41 !important;
-        color: #000000 !important;
-        font-family: 'Orbitron', sans-serif !important;
-        font-weight: 900 !important;
-        border: none !important;
-        box-shadow: 0 0 10px rgba(0, 255, 65, 0.3) !important;
+        background-color: #00ff41 !important; color: #000000 !important;
+        font-family: 'Orbitron', sans-serif !important; font-weight: 900 !important;
+        border: none !important; box-shadow: 0 0 10px rgba(0, 255, 65, 0.3) !important;
     }
-    .stButton > button:hover {
-        background-color: #00cc33 !important;
-        box-shadow: 0 0 25px rgba(0, 255, 65, 0.8) !important;
-        transform: scale(1.02);
-    }
+    .stButton > button:hover { background-color: #00cc33 !important; transform: scale(1.02); }
 
-    /* 输入框优化 */
     .stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input {
-        background-color: #0d1117 !important;
-        color: #00f3ff !important;
-        border: 1px solid #30363d !important;
-        font-weight: bold !important;
+        background-color: #0d1117 !important; color: #00f3ff !important; border: 1px solid #30363d !important; font-weight: bold !important;
     }
-    /* 标签文字亮白 */
     label { color: #ffffff !important; font-family: 'Orbitron', sans-serif !important; letter-spacing: 1px !important; }
 
-    /* 登录框 */
-    .login-container { 
-        background: rgba(13, 17, 23, 0.95); padding: 40px; 
-        border-radius: 12px; border: 1px solid #30363d; 
-        box-shadow: 0 20px 50px rgba(0,0,0,0.8);
-    }
+    .login-container { background: rgba(13, 17, 23, 0.95); padding: 40px; border-radius: 12px; border: 1px solid #30363d; }
     
-    /* HUD 卡片 */
-    .hud-card {
-        background: #161b22; border-radius: 8px; padding: 20px; 
-        border: 1px solid #30363d; box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
+    .hud-card { background: #161b22; border-radius: 8px; padding: 20px; border: 1px solid #30363d; }
     .card-value { font-family: 'Orbitron'; font-size: 2rem; font-weight: 700; color: #fff; }
     .glow-blue { border-bottom: 3px solid #00f3ff; }
     .glow-green { border-bottom: 3px solid #00ff41; }
@@ -68,7 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 初始化 Supabase & User
+# 2. 初始化
 # ==========================================
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -94,7 +69,7 @@ def render_hud(title, val, sub, theme="blue"):
     """
 
 # ==========================================
-# 4. 登录界面 (Login UI)
+# 4. Login UI
 # ==========================================
 def login_ui():
     st.write(""); st.write("")
@@ -103,33 +78,45 @@ def login_ui():
         st.markdown("<h1 style='text-align:center; color:#00ff41; font-family:Orbitron; font-size: 3.5rem; text-shadow: 0 0 20px rgba(0,255,65,0.4);'>QUANT OS</h1>", unsafe_allow_html=True)
         with st.container():
             st.markdown('<div class="login-container">', unsafe_allow_html=True)
-            tab1, tab2 = st.tabs(["🔒 ACCESS", "📝 ENROLL"])
+            tab1, tab2 = st.tabs(["🔒 LOGIN", "📝 REGISTER"])
             with tab1:
-                email = st.text_input("OPERATOR ID", key="l_e")
-                pwd = st.text_input("ACCESS KEY", type="password", key="l_p")
-                st.write("") 
+                email = st.text_input("EMAIL", key="l_e")
+                pwd = st.text_input("PASSWORD", type="password", key="l_p")
                 if st.button("ENTER SYSTEM ➜", use_container_width=True):
                     try:
                         res = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
                         st.session_state.user = res.user; st.session_state.session = res.session; st.rerun()
-                    except Exception as e: st.error(f"ACCESS DENIED: {e}")
+                    except Exception as e: st.error(str(e))
             with tab2:
-                email = st.text_input("NEW ID", key="r_e")
-                pwd = st.text_input("SET KEY", type="password", key="r_p")
-                st.write("")
-                if st.button("INITIALIZE ID ➜", use_container_width=True):
+                email = st.text_input("NEW EMAIL", key="r_e")
+                pwd = st.text_input("NEW PASSWORD", type="password", key="r_p")
+                if st.button("CREATE ID ➜", use_container_width=True):
                     try: supabase.auth.sign_up({"email": email, "password": pwd}); st.success("Check Email")
-                    except Exception as e: st.error(f"Error: {e}")
+                    except Exception as e: st.error(str(e))
             st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# 5. 主程序 (Main Dashboard)
+# 5. Main App
 # ==========================================
 def main_app():
     user = st.session_state.user
     cookie_manager = stx.CookieManager()
     cookies = cookie_manager.get_all()
     
+    # 🔥 1. 先计算数据 (解决报错的关键！)
+    market = price_engine.get_market_data_instance()
+    raw = price_engine.get_user_portfolio(supabase)
+    df = price_engine.calculate_dashboard_data(raw, market)
+    
+    # 指标计算
+    val = df['Current Value'].sum() if not df.empty else 0
+    cost = (df['Amount'] * df['Avg Buy Price']).sum() if not df.empty else 0
+    pnl = val - cost
+    pct = (pnl/cost*100) if cost>0 else 0
+    goal = price_engine.get_user_goal(supabase, user.id)
+    goal_pct = min((val/goal*100), 100) if goal>0 else 0
+    est_tax = max(pnl * (st.session_state.get('tax_rate', 30.0)/100), 0)
+
     # --- Sidebar ---
     with st.sidebar:
         st.markdown("### ⚙ CONTROL PANEL")
@@ -138,30 +125,28 @@ def main_app():
         
         if mode == "MANUAL ENTRY":
             with st.form("manual"):
-                sym = st.text_input("SYMBOL (e.g. BTC)").upper()
+                sym = st.text_input("SYMBOL", value="BTC").upper()
                 amt = st.number_input("QUANTITY", min_value=0.0, format="%.4f")
-                avg = st.number_input("AVG PRICE", min_value=0.0, format="%.2f")
-                if st.form_submit_button("SAVE DATA"):
-                    price_engine.upsert_user_asset(supabase, user.id, sym, amt, avg); st.toast("Saved"); time.sleep(0.5); st.rerun()
-                    
-        else: # AUTO SYNC
+                avg = st.number_input("AVG PRICE", 0.0, format="%.2f")
+                if st.form_submit_button("SAVE"):
+                    price_engine.upsert_user_asset(supabase, user.id, sym, amt, avg); st.rerun()
+        else:
             exchange = st.selectbox("EXCHANGE", ["binance", "okx", "bybit", "kraken", "kucoin", "bitget", "gate"])
             c_key = cookies.get(f"{exchange}_key", ""); c_sec = cookies.get(f"{exchange}_sec", ""); c_pass = cookies.get(f"{exchange}_pass", "")
             
             api_key = st.text_input("API Key", value=str(c_key), type="password")
             api_sec = st.text_input("Secret Key", value=str(c_sec), type="password")
             
-            password = None
-            # 智能判断是否需要密码
             needs_pass = exchange in ['okx', 'kucoin', 'bitget', 'gate']
+            pass_val = str(c_pass) if c_pass else ""
+            password = None
             if st.checkbox("Requires Passphrase?", value=bool(c_pass) or needs_pass):
-                password = st.text_input("Passphrase", value=str(c_pass), type="password")
+                password = st.text_input("Passphrase", value=pass_val, type="password")
             
             remember = st.checkbox("Remember Keys")
-            
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("SYNC BAL", help="Update Balance"):
+                if st.button("SYNC BAL"):
                     if remember:
                         exp = datetime.datetime.now() + datetime.timedelta(days=30)
                         cookie_manager.set(f"{exchange}_key", api_key, expires_at=exp)
@@ -172,12 +157,11 @@ def main_app():
                         if ok: st.success("Updated"); time.sleep(1); st.rerun()
                         else: st.error(msg)
             with col2:
-                if st.button("SYNC LOG", help="Fetch History for Tax"):
+                if st.button("SYNC LOG"):
                     with st.spinner("Fetching..."):
                         ok, msg = price_engine.sync_history_log(supabase, user.id, exchange, api_key, api_sec, password)
                         if ok: st.success("Done"); time.sleep(1); st.rerun()
                         else: st.error(msg)
-            
             if st.button("Clear Keys"):
                 cookie_manager.delete(f"{exchange}_key"); cookie_manager.delete(f"{exchange}_sec"); 
                 if password: cookie_manager.delete(f"{exchange}_pass")
@@ -186,29 +170,29 @@ def main_app():
         st.divider()
         with st.expander("🎯 TAX & GOAL"):
             cur = price_engine.get_user_goal(supabase, user.id)
-            new = st.number_input("Target Net Worth", value=float(cur), step=5000.0)
+            new = st.number_input("Target $", value=float(cur), step=5000.0)
             if 'tax_rate' not in st.session_state: st.session_state.tax_rate = 30.0
-            st.session_state.tax_rate = st.slider("Est. Tax Rate %", 0.0, 50.0, st.session_state.tax_rate)
+            st.session_state.tax_rate = st.slider("Tax Rate %", 0.0, 50.0, st.session_state.tax_rate)
             if st.button("SAVE"): price_engine.upsert_user_goal(supabase, user.id, new); st.rerun()
+
+        # 🔥 2. 资产管理 (删除功能) - 现在 df 已经有值了，不会报错！
+        with st.expander("🗑️ MANAGE ASSETS"):
+            asset_list = [row['Symbol'] for row in df.to_dict('records')] if not df.empty else []
+            if asset_list:
+                to_del = st.selectbox("Select Asset", asset_list)
+                if st.button(f"DELETE {to_del}"):
+                    price_engine.delete_user_asset(supabase, user.id, to_del)
+                    st.toast("Deleted"); time.sleep(0.5); st.rerun()
+                st.write("")
+                if st.button("⚠️ RESET ALL", type="primary"):
+                    price_engine.reset_user_portfolio(supabase, user.id)
+                    st.success("Cleared"); time.sleep(0.5); st.rerun()
+            else: st.caption("Empty Portfolio")
 
         if st.button("LOGOUT"): supabase.auth.sign_out(); st.session_state.user = None; st.rerun()
 
-    # --- Calculations ---
-    market = price_engine.get_market_data_instance()
-    raw = price_engine.get_user_portfolio(supabase)
-    df = price_engine.calculate_dashboard_data(raw, market)
-    
-    val = df['Current Value'].sum() if not df.empty else 0
-    cost = (df['Amount'] * df['Avg Buy Price']).sum() if not df.empty else 0
-    pnl = val - cost
-    pct = (pnl/cost*100) if cost>0 else 0
-    goal = price_engine.get_user_goal(supabase, user.id)
-    goal_pct = min((val/goal*100), 100) if goal>0 else 0
-    est_tax = max(pnl * (st.session_state.tax_rate/100), 0)
-
     # --- Dashboard UI ---
     st.markdown("### 📡 SYSTEM STATUS: ONLINE")
-    
     c1, c2, c3 = st.columns(3)
     with c1: st.markdown(render_hud("NET WORTH", f"${val:,.2f}", "TOTAL ASSETS", "blue"), unsafe_allow_html=True)
     with c2: st.markdown(render_hud("24H P&L", f"${pnl:,.2f}", f"{pct:+.2f}%", "green" if pnl>=0 else "red"), unsafe_allow_html=True)
@@ -231,7 +215,7 @@ def main_app():
     with c_left:
         st.markdown("#### 📊 LIVE POSITIONS")
         if not df.empty:
-            # ✅ 仅保留这个原生表格，它现在会自动适配深色模式
+            # 🔥 3. 换回原生 dataframe (配合 config.toml 就是黑色的，不会有乱码)
             st.dataframe(
                 df,
                 column_order=['Symbol', 'Amount', 'Avg Buy Price', 'Current Price', 'Current Value', 'P&L %'],
@@ -256,6 +240,7 @@ def main_app():
             st.plotly_chart(fig, use_container_width=True)
     
     # --- Tax Engine ---
+    # --- Tax Engine ---
     st.markdown("---"); st.markdown("### 🏛 THE TAX ENGINE")
     
     with st.expander("➕ Manual Tax Record"):
@@ -263,38 +248,22 @@ def main_app():
             cc1, cc2, cc3, cc4 = st.columns(4)
             tt = cc1.selectbox("TYPE", ["BUY", "SELL"])
             ts = cc2.text_input("SYM", "BTC").upper()
-            tq = cc3.number_input("QTY", 0.0)
-            tp = cc4.number_input("PRICE", 0.0)
+            
+            # ✅ Changed to text_input for free typing
+            tq_str = cc3.text_input("QTY", value="0.0000")
+            tp_str = cc4.text_input("PRICE ($)", value="0.00")
+            
             td = st.date_input("DATE", datetime.date.today())
+            
             if st.form_submit_button("ADD"):
-                price_engine.add_transaction(supabase, user.id, ts, tt, tq, tp, td); st.rerun()
-
-    tx_df = price_engine.get_transaction_history(supabase, user.id)
-    if not tx_df.empty:
-        calc = price_engine.TaxCalculator()
-        realized, events = calc.calculate(tx_df)
-        
-        st.markdown(f"""
-        <div style="display:flex; gap:20px; margin-bottom:20px;">
-            <div style="color:#fff;">REALIZED P&L: <span style="color:{'#00ff41' if realized>0 else '#ff003c'}">${realized:,.2f}</span></div>
-            <div style="color:#8b949e;">STRATEGY: <span style="color:#00f3ff">FIFO</span></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        for e in reversed(events[-5:]):
-            c = "#00ff41" if e['term']=="LONG" else "#ff003c"
-            tag = "LONG TERM" if e['term']=="LONG" else "SHORT TERM"
-            st.markdown(f"""
-            <div style="background:#161b22; border-left:4px solid {c}; padding:15px; margin-bottom:10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
-                <div><span style="color:{c}; font-weight:bold">SOLD</span> <span style="color:#fff; font-weight:bold; margin-left:10px;">{e['symbol']} ({e['qty']:.4f})</span></div>
-                <div><span style="background:{c}; color:#000; padding:2px 8px; border-radius:2px; font-weight:bold; font-size:0.8rem; margin-right:15px;">{tag}</span><span style="color:#8b949e">Gain:</span> <span style="color:{c}; font-weight:bold">${e['gain']:,.2f}</span></div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("No transaction history. Use SYNC LOG in sidebar to fetch.")
-
-    time.sleep(2)
-    st.rerun()
+                try:
+                    # Convert string to float safely
+                    tq = float(tq_str)
+                    tp = float(tp_str)
+                    price_engine.add_transaction(supabase, user.id, ts, tt, tq, tp, td)
+                    st.success("Recorded"); time.sleep(0.5); st.rerun()
+                except:
+                    st.error("Invalid Number")
 
 if __name__ == "__main__":
     if st.session_state.user: main_app()
