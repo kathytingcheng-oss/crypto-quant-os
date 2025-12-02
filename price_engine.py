@@ -5,67 +5,115 @@ import pandas as pd
 import streamlit as st
 import datetime
 from collections import deque
+from streamlit_autorefresh import st_autorefresh
 
 # ==========================================
-# 1. 实时价格获取 (修复数据覆盖 Bug 版)
+# 0. 页面配置 & 自动刷新 (核心配置)
+# ==========================================
+st.set_page_config(
+    page_title="Crypto Dashboard",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 设置每 2000 毫秒 (2秒) 自动刷新一次页面
+# 配合后台的 2秒抓取，实现准实时跳动
+st_autorefresh(interval=2000, key="data_refresher")
+
+# ==========================================
+# 1. 实时价格获取 (智能防崩溃 + 极速版)
 # ==========================================
 class MarketData:
     def __init__(self):
         self.prices = {}
+        # 默认关注列表，防止启动时空跑
+        self.targets = {'BTC', 'ETH', 'SOL', 'USDT'} 
         self.lock = threading.Lock()
         self.exchange = ccxt.kraken()
         self.running = True
         self.thread = threading.Thread(target=self._update_loop, daemon=True)
         self.thread.start()
 
+    def update_targets(self, symbols_list):
+        """接收外部传入的持仓币种，加入关注列表"""
+        if not symbols_list: return
+        with self.lock:
+            # 排除 USD，只保留加密货币代码
+            new_targets = set(s for s in symbols_list if s not in ['USD'])
+            if new_targets:
+                self.targets.update(new_targets)
+
     def _update_loop(self):
         while self.running:
+            tickers = {}
             try:
-                tickers = self.exchange.fetch_tickers()
+                # --- 尝试方案 A: 极速精准抓取 (只抓持仓币) ---
+                fetch_list = []
+                with self.lock:
+                    current_targets = list(self.targets)
+                
+                for symbol in current_targets:
+                    s = symbol.strip().upper()
+                    # 拼接 Kraken 需要的格式
+                    if '/' not in s:
+                        fetch_list.append(f"{s}/USD")
+                    else:
+                        fetch_list.append(s)
+
+                if fetch_list:
+                    # 尝试抓取指定列表。如果列表里有 Kraken 不支持的币(如BNB)，这里可能会抛异常
+                    tickers = self.exchange.fetch_tickers(fetch_list)
+                
+            except Exception:
+                # --- 尝试方案 B: 兼容模式 (如果方案A报错，则抓全量) ---
+                # 这能防止因为持有一个不支持的币导致整个价格卡死
+                try:
+                    tickers = self.exchange.fetch_tickers() 
+                except:
+                    pass # 网络彻底挂了，静默重试
+
+            # --- 统一更新数据 ---
+            if tickers:
                 with self.lock:
                     for symbol, ticker in tickers.items():
                         if not ticker or ticker['last'] is None: continue
                         price = float(ticker['last'])
                         
-                        # 1. 先存原始交易对 (如 ETH/BTC)
                         self.prices[symbol] = price
                         
-                        # 2. 智能拆解 (🔥 核心修复在这里！)
+                        # 智能拆解: 将 ETH/USD 拆解为 ETH 供查询
                         if '/' in symbol:
                             parts = symbol.split('/')
                             base = parts[0]
                             quote = parts[1]
-                            
-                            # 只有当 Quote 是法币或稳定币时，才更新 Base 价格
-                            # 这样 ETH/BTC (0.03) 就不会覆盖 ETH/USD (3000) 了
-                            if quote in ['USD', 'USDT', 'USDC', 'DAI']:
+                            # 只要 Quote 是法币或主流稳定币，就认为 Base 的价格有效
+                            if quote in ['USD', 'USDT', 'USDC', 'DAI', 'ZUSD']:
                                 self.prices[base] = price
                                 self.prices[f"{base}/USD"] = price
-                                self.prices[f"{base}/USDT"] = price
-            except: pass
-            time.sleep(5)
+            
+            # 2秒更新一次，配合前端刷新
+            time.sleep(2)
 
     def get_price(self, symbol: str) -> float:
         lookup = symbol.upper().strip()
         with self.lock:
-            # 优先查缓存
             if lookup in self.prices: return self.prices[lookup]
+            # 常见变体检查
             for k in [f"{lookup}/USD", f"{lookup}/USDT"]:
                 if k in self.prices: return self.prices[k]
         
         # 稳定币兜底
         if lookup in ['USDC', 'USDT', 'DAI', 'BUSD', 'FDUSD']: return 1.0
         
-        # 现场抓取
-        try: return float(self.exchange.fetch_ticker(f"{lookup}/USD")['last'])
-        except: return 0.0
+        return 0.0
 
 @st.cache_resource
 def get_market_data_instance():
     return MarketData()
 
 # ==========================================
-# 2. 数据库操作
+# 2. 数据库操作 (保持不变)
 # ==========================================
 def get_user_portfolio(supabase_client):
     try:
@@ -74,7 +122,6 @@ def get_user_portfolio(supabase_client):
     except: return []
 
 def upsert_user_asset(supabase_client, user_id, symbol, amount, avg_price):
-    # 智能成本修正
     if avg_price == 0:
         if symbol in ['USDT', 'USDC', 'DAI', 'USD']:
             avg_price = 1.0
@@ -105,10 +152,15 @@ def upsert_user_goal(supabase_client, user_id, goal):
     supabase_client.table("user_settings").upsert({"user_id": user_id, "net_worth_goal": goal}).execute()
 
 # ==========================================
-# 3. 计算逻辑
+# 3. 计算逻辑 (已连接自动同步)
 # ==========================================
 def calculate_dashboard_data(portfolio_data, market_data):
     if not portfolio_data: return pd.DataFrame()
+    
+    # 🔥 关键步骤：把用户的持仓币种告诉后台，让它优先抓取这些
+    user_symbols = [item['symbol'] for item in portfolio_data]
+    market_data.update_targets(user_symbols)
+
     rows = []
     for item in portfolio_data:
         sym = item['symbol']
@@ -124,7 +176,7 @@ def calculate_dashboard_data(portfolio_data, market_data):
     return pd.DataFrame(rows)
 
 # ==========================================
-# 4. 同步余额
+# 4. 同步余额 (保持不变)
 # ==========================================
 def sync_exchange_holdings(supabase_client, user_id, exchange_id, api_key, api_secret, password=None):
     try:
@@ -143,7 +195,7 @@ def sync_exchange_holdings(supabase_client, user_id, exchange_id, api_key, api_s
     except Exception as e: return False, f"Sync Error: {str(e)}"
 
 # ==========================================
-# 5. 核心：同步历史
+# 5. 核心：同步历史 (保持不变)
 # ==========================================
 def add_transaction(supabase, user_id, symbol, type, qty, price, date):
     data = {"user_id": user_id, "symbol": symbol.upper(), "type": type, "quantity": qty, "price": price, "timestamp": date.isoformat()}
