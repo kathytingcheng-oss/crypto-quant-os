@@ -103,6 +103,7 @@ def login_ui():
                     except Exception as e: st.error(str(e))
             st.markdown('</div>', unsafe_allow_html=True)
 
+
 # ==========================================
 # 5. Main App
 # ==========================================
@@ -115,6 +116,7 @@ def main_app():
     raw = price_engine.get_user_portfolio(supabase)
     df = price_engine.calculate_dashboard_data(raw, market)
     
+    # 核心计算
     val = df['Current Value'].sum() if not df.empty else 0
     cost = (df['Amount'] * df['Avg Buy Price']).sum() if not df.empty else 0
     pnl = val - cost
@@ -123,27 +125,32 @@ def main_app():
     goal_pct = min((val/goal*100), 100) if goal>0 else 0
     est_tax = max(pnl * (st.session_state.get('tax_rate', 30.0)/100), 0)
 
-    # --- Sidebar ---
+    # --- Sidebar (侧边栏布局) ---
     with st.sidebar:
         st.markdown("### ⚙ CONTROL PANEL")
+        
+        # 1. 模式选择 (Mode Selection)
         mode = st.radio("MODE", ["MANUAL ENTRY", "AUTO SYNC (API)"])
         st.divider()
         
+        # 2. 数据源输入 (Input Section)
         if mode == "MANUAL ENTRY":
+            st.caption("📝 Add/Update Holdings")
             with st.form("manual"):
                 sym = st.text_input("SYMBOL", value="BTC").upper()
                 amt_str = st.text_input("QUANTITY", value="0.0000")
                 avg_str = st.text_input("AVG PRICE ($)", value="0.00")
                 
-                if st.form_submit_button("SAVE"):
+                if st.form_submit_button("SAVE ASSET"):
                     try:
                         amt = float(amt_str)
                         avg = float(avg_str)
                         price_engine.upsert_user_asset(supabase, user.id, sym, amt, avg)
-                        st.toast("Saved"); time.sleep(0.5); st.rerun()
+                        st.toast("Asset Saved"); time.sleep(0.5); st.rerun()
                     except: st.error("Invalid Number")
                     
-        else:
+        else: # AUTO SYNC
+            st.caption("🔗 Exchange Connection")
             exchange = st.selectbox("EXCHANGE", ["binance", "okx", "bybit", "kraken", "kucoin", "bitget", "gate"])
             c_key = cookies.get(f"{exchange}_key", ""); c_sec = cookies.get(f"{exchange}_sec", ""); c_pass = cookies.get(f"{exchange}_pass", "")
             api_key = st.text_input("API Key", value=str(c_key), type="password")
@@ -178,29 +185,33 @@ def main_app():
                 st.rerun()
 
         st.divider()
-        with st.expander("🎯 TAX & GOAL"):
+
+        # 3. 目标与税务 (Tax & Goal) - 固定位置
+        with st.expander("🎯 TAX & GOAL", expanded=False):
             cur = price_engine.get_user_goal(supabase, user.id)
             new = st.number_input("Target $", value=float(cur), step=5000.0)
             if 'tax_rate' not in st.session_state: st.session_state.tax_rate = 30.0
             st.session_state.tax_rate = st.slider("Tax Rate %", 0.0, 50.0, st.session_state.tax_rate)
-            if st.button("SAVE"): price_engine.upsert_user_goal(supabase, user.id, new); st.rerun()
+            if st.button("SAVE GOAL"): price_engine.upsert_user_goal(supabase, user.id, new); st.rerun()
 
-        with st.expander("🗑️ MANAGE ASSETS"):
+        # 4. 资产管理 (Manage Assets) - 确保只在这里出现，且在Tax下方
+        with st.expander("🗑️ MANAGE ASSETS", expanded=False):
             asset_list = [row['Symbol'] for row in df.to_dict('records')] if not df.empty else []
             if asset_list:
-                to_del = st.selectbox("Select Asset", asset_list)
-                if st.button(f"DELETE {to_del}"):
+                to_del = st.selectbox("Select Asset to Delete", asset_list)
+                if st.button(f"DELETE {to_del}", type="secondary"):
                     price_engine.delete_user_asset(supabase, user.id, to_del)
                     st.toast("Deleted"); time.sleep(0.5); st.rerun()
                 st.write("")
-                if st.button("⚠️ RESET ALL", type="primary"):
+                if st.button("⚠️ RESET PORTFOLIO", type="primary"):
                     price_engine.reset_user_portfolio(supabase, user.id)
                     st.success("Cleared"); time.sleep(0.5); st.rerun()
-            else: st.caption("Empty Portfolio")
+            else: st.caption("No assets to manage.")
 
+        st.write("")
         if st.button("LOGOUT"): supabase.auth.sign_out(); st.session_state.user = None; st.rerun()
 
-    # --- Dashboard UI ---
+    # --- Dashboard UI (右侧主界面) ---
     st.markdown("### 📡 SYSTEM STATUS: ONLINE")
     c1, c2, c3 = st.columns(3)
     with c1: st.markdown(render_hud("NET WORTH", f"${val:,.2f}", "TOTAL ASSETS", "blue"), unsafe_allow_html=True)
@@ -224,12 +235,10 @@ def main_app():
     with c_left:
         st.markdown("#### 📊 LIVE POSITIONS")
         if not df.empty:
-            # 1. 给 P&L % 这一列上色 (map 函数)
             def color_pnl(val):
-                color = '#00ff41' if val >= 0 else '#ff003c' # 绿/红
+                color = '#00ff41' if val >= 0 else '#ff003c'
                 return f'color: {color}; font-weight: bold;'
 
-            # 2. 格式化数值并应用样式
             styled_df = df.style.format({
                 "Amount": "{:.4f}",
                 "Avg Buy Price": "${:,.2f}",
@@ -238,7 +247,6 @@ def main_app():
                 "P&L %": "{:+.2f}%"
             }).map(color_pnl, subset=['P&L %'])
 
-            # 3. 渲染表格
             st.dataframe(
                 styled_df,
                 column_order=['Symbol', 'Amount', 'Avg Buy Price', 'Current Price', 'Current Value', 'P&L %'],
@@ -246,12 +254,8 @@ def main_app():
                 use_container_width=True,
                 height=400,
                 column_config={
-                    "Symbol": "Asset",
-                    "Amount": "Holdings",
-                    "Avg Buy Price": "Avg Buy",
-                    "Current Price": "Price",
-                    "Current Value": "Value",
-                    "P&L %": "Performance"
+                    "Symbol": "Asset", "Amount": "Holdings", "Avg Buy Price": "Avg Buy",
+                    "Current Price": "Price", "Current Value": "Value", "P&L %": "Performance"
                 }
             )
         else: st.info("Waiting for data...")
@@ -259,46 +263,19 @@ def main_app():
     with c_right:
         st.markdown("#### 🍩 ALLOCATION")
         if not df.empty:
-            # 1. 布局设置
             fig = go.Figure(data=[go.Pie(labels=df['Symbol'], values=df['Current Value'], hole=.6)])
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False, margin=dict(t=0,b=0,l=0,r=0), height=300)
             
-            fig.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)', 
-                plot_bgcolor='rgba(0,0,0,0)', 
-                showlegend=False, 
-                margin=dict(t=0,b=0,l=0,r=0), 
-                height=300
-            )
-            
-            # 🎨 THEME: ENERGY BAR GRADIENT (能量条渐变)
-            # 参考了你的进度条截图：带有青色调的荧光绿 -> 纯绿 -> 深绿
-            # 这种渐变比纯绿更洋气，有一种“充能”的感觉
-            energy_gradient = [
-                '#5affd6',  # 进度条最亮端的青绿色 (Cyan Green)
-                '#00ff41',  # 你的按钮标准绿 (Button Green)
-                '#00d135',  # 中绿
-                '#00a329',  # 深绿
-                '#00751d'   # 暗绿
-            ]
+            # 🎨 THEME: ENERGY BAR GRADIENT
+            energy_gradient = ['#5affd6', '#00ff41', '#00d135', '#00a329', '#00751d']
             
             fig.update_traces(
                 textinfo='percent+label', 
-                
-                # 🔥 字体颜色 🔥
-                # 极深的墨绿色 (接近黑色)，对比度最高
                 textfont=dict(family="Arial Black", size=14, color='#001a05'),
-                
                 textposition='inside',
-                
-                # 🔥 视觉质感 🔥
-                opacity=1.0,  # 保持高亮实心，还原进度条的实感
-                marker=dict(
-                    colors=energy_gradient, 
-                    # 黑色边框，保持硬朗
-                    line=dict(color='#000000', width=2) 
-                )
+                opacity=1.0,
+                marker=dict(colors=energy_gradient, line=dict(color='#000000', width=2))
             )
-            
             st.plotly_chart(fig, use_container_width=True)
     
     # --- Tax Engine ---
@@ -315,12 +292,10 @@ def main_app():
             
             if st.form_submit_button("ADD"):
                 try:
-                    tq = float(tq_str)
-                    tp = float(tp_str)
+                    tq = float(tq_str); tp = float(tp_str)
                     price_engine.add_transaction(supabase, user.id, ts, tt, tq, tp, td)
                     st.success("Recorded"); time.sleep(0.5); st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Database Error: {e}")
+                except Exception as e: st.error(f"❌ Error: {e}")
 
     tx_df = price_engine.get_transaction_history(supabase, user.id)
     if not tx_df.empty:
@@ -336,7 +311,6 @@ def main_app():
                 st.success("Cleared"); time.sleep(0.5); st.rerun()
 
         t1, t2 = st.tabs(["💰 TAX EVENTS", "📜 FULL LEDGER"])
-        
         with t1:
             if events:
                 for e in reversed(events[-5:]):
@@ -349,18 +323,13 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
             else: st.info("No taxable events yet.")
-        
         with t2:
             st.caption("Click X to delete specific record")
             for index, row in tx_df.sort_values('timestamp', ascending=False).iterrows():
                 c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 2, 1])
                 ts_str = pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d')
-                c1.write(ts_str)
-                c2.write(row['type'])
-                c3.write(f"{row['symbol']}")
-                c4.write(f"{float(row['quantity']):.4f} @ ${float(row['price']):,.0f}")
-                if c5.button("❌", key=f"del_{row['id']}"):
-                    price_engine.delete_transaction(supabase, row['id']); st.rerun()
+                c1.write(ts_str); c2.write(row['type']); c3.write(f"{row['symbol']}"); c4.write(f"{float(row['quantity']):.4f} @ ${float(row['price']):,.0f}")
+                if c5.button("❌", key=f"del_{row['id']}"): price_engine.delete_transaction(supabase, row['id']); st.rerun()
     else:
         st.info("No transaction history. Use SYNC LOG or Manual Add.")
 
