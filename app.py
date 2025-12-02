@@ -20,6 +20,7 @@ st.markdown("""
     .stApp { background-color: #05070a; color: #e0f7ff; font-family: 'Roboto Mono', monospace; }
     [data-testid="stSidebar"] { background-color: #0b0f15; border-right: 1px solid #30363d; }
 
+    /* 按钮 */
     .stButton > button {
         background-color: #00ff41 !important; color: #000000 !important;
         font-family: 'Orbitron', sans-serif !important; font-weight: 900 !important;
@@ -27,18 +28,20 @@ st.markdown("""
     }
     .stButton > button:hover { background-color: #00cc33 !important; transform: scale(1.02); }
 
+    /* 输入框 */
     .stTextInput input, .stSelectbox div[data-baseweb="select"], .stNumberInput input {
         background-color: #0d1117 !important; color: #00f3ff !important; border: 1px solid #30363d !important; font-weight: bold !important;
     }
     label { color: #ffffff !important; font-family: 'Orbitron', sans-serif !important; letter-spacing: 1px !important; }
 
-    .login-container { background: rgba(13, 17, 23, 0.95); padding: 40px; border-radius: 12px; border: 1px solid #30363d; }
-    
     .hud-card { background: #161b22; border-radius: 8px; padding: 20px; border: 1px solid #30363d; }
     .card-value { font-family: 'Orbitron'; font-size: 2rem; font-weight: 700; color: #fff; }
     .glow-blue { border-bottom: 3px solid #00f3ff; }
     .glow-green { border-bottom: 3px solid #00ff41; }
     .glow-red { border-bottom: 3px solid #ff003c; }
+    
+    /* 登录框 */
+    .login-container { background: rgba(13, 17, 23, 0.95); padding: 40px; border-radius: 12px; border: 1px solid #30363d; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -103,12 +106,10 @@ def main_app():
     cookie_manager = stx.CookieManager()
     cookies = cookie_manager.get_all()
     
-    # 🔥 1. 先计算数据 (解决报错的关键！)
     market = price_engine.get_market_data_instance()
     raw = price_engine.get_user_portfolio(supabase)
     df = price_engine.calculate_dashboard_data(raw, market)
     
-    # 指标计算
     val = df['Current Value'].sum() if not df.empty else 0
     cost = (df['Amount'] * df['Avg Buy Price']).sum() if not df.empty else 0
     pnl = val - cost
@@ -126,22 +127,26 @@ def main_app():
         if mode == "MANUAL ENTRY":
             with st.form("manual"):
                 sym = st.text_input("SYMBOL", value="BTC").upper()
-                amt = st.number_input("QUANTITY", min_value=0.0, format="%.4f")
-                avg = st.number_input("AVG PRICE", 0.0, format="%.2f")
+                amt_str = st.text_input("QUANTITY", value="0.0000")
+                avg_str = st.text_input("AVG PRICE ($)", value="0.00")
+                
                 if st.form_submit_button("SAVE"):
-                    price_engine.upsert_user_asset(supabase, user.id, sym, amt, avg); st.rerun()
+                    try:
+                        amt = float(amt_str)
+                        avg = float(avg_str)
+                        price_engine.upsert_user_asset(supabase, user.id, sym, amt, avg)
+                        st.toast("Saved"); time.sleep(0.5); st.rerun()
+                    except: st.error("Invalid Number")
+                    
         else:
             exchange = st.selectbox("EXCHANGE", ["binance", "okx", "bybit", "kraken", "kucoin", "bitget", "gate"])
             c_key = cookies.get(f"{exchange}_key", ""); c_sec = cookies.get(f"{exchange}_sec", ""); c_pass = cookies.get(f"{exchange}_pass", "")
-            
             api_key = st.text_input("API Key", value=str(c_key), type="password")
             api_sec = st.text_input("Secret Key", value=str(c_sec), type="password")
-            
-            needs_pass = exchange in ['okx', 'kucoin', 'bitget', 'gate']
-            pass_val = str(c_pass) if c_pass else ""
             password = None
+            needs_pass = exchange in ['okx', 'kucoin', 'bitget', 'gate']
             if st.checkbox("Requires Passphrase?", value=bool(c_pass) or needs_pass):
-                password = st.text_input("Passphrase", value=pass_val, type="password")
+                password = st.text_input("Passphrase", value=str(c_pass) if c_pass else "", type="password")
             
             remember = st.checkbox("Remember Keys")
             col1, col2 = st.columns(2)
@@ -175,7 +180,6 @@ def main_app():
             st.session_state.tax_rate = st.slider("Tax Rate %", 0.0, 50.0, st.session_state.tax_rate)
             if st.button("SAVE"): price_engine.upsert_user_goal(supabase, user.id, new); st.rerun()
 
-        # 🔥 2. 资产管理 (删除功能) - 现在 df 已经有值了，不会报错！
         with st.expander("🗑️ MANAGE ASSETS"):
             asset_list = [row['Symbol'] for row in df.to_dict('records')] if not df.empty else []
             if asset_list:
@@ -215,18 +219,34 @@ def main_app():
     with c_left:
         st.markdown("#### 📊 LIVE POSITIONS")
         if not df.empty:
-            # 🔥 3. 换回原生 dataframe (配合 config.toml 就是黑色的，不会有乱码)
+            # 1. 给 P&L % 这一列上色 (map 函数)
+            def color_pnl(val):
+                color = '#00ff41' if val >= 0 else '#ff003c' # 绿/红
+                return f'color: {color}; font-weight: bold;'
+
+            # 2. 格式化数值并应用样式
+            styled_df = df.style.format({
+                "Amount": "{:.4f}",
+                "Avg Buy Price": "${:,.2f}",
+                "Current Price": "${:,.2f}",
+                "Current Value": "${:,.2f}",
+                "P&L %": "{:+.2f}%"
+            }).map(color_pnl, subset=['P&L %'])
+
+            # 3. 渲染表格
             st.dataframe(
-                df,
+                styled_df,
                 column_order=['Symbol', 'Amount', 'Avg Buy Price', 'Current Price', 'Current Value', 'P&L %'],
-                hide_index=True, use_container_width=True, height=400,
+                hide_index=True, 
+                use_container_width=True,
+                height=400,
                 column_config={
-                    "Symbol": st.column_config.TextColumn("Asset"),
-                    "Amount": st.column_config.NumberColumn("Holdings", format="%.4f"),
-                    "Avg Buy Price": st.column_config.NumberColumn("Avg Buy", format="$%.2f"),
-                    "Current Price": st.column_config.NumberColumn("Price", format="$%.2f"),
-                    "Current Value": st.column_config.NumberColumn("Value", format="$%.2f"),
-                    "P&L %": st.column_config.ProgressColumn("Performance", format="%.2f%%", min_value=-100, max_value=100)
+                    "Symbol": "Asset",
+                    "Amount": "Holdings",
+                    "Avg Buy Price": "Avg Buy",
+                    "Current Price": "Price",
+                    "Current Value": "Value",
+                    "P&L %": "Performance"
                 }
             )
         else: st.info("Waiting for data...")
@@ -236,13 +256,18 @@ def main_app():
         if not df.empty:
             fig = go.Figure(data=[go.Pie(labels=df['Symbol'], values=df['Current Value'], hole=.6)])
             fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False, margin=dict(t=0,b=0,l=0,r=0), height=300)
-            fig.update_traces(marker=dict(colors=['#00f3ff', '#00ff41', '#ff003c', '#e0f7ff']))
+            
+            # 🔥 核心修改：添加 opacity=0.8 实现透明发光效果
+            fig.update_traces(
+                marker=dict(colors=['#00f3ff', '#bd00ff', '#0066ff', '#00ff41', '#00c3ff']),
+                opacity=0.8 
+            )
+            
             st.plotly_chart(fig, use_container_width=True)
     
     # --- Tax Engine ---
     st.markdown("---"); st.markdown("### 🏛 THE TAX ENGINE")
     
-    # 1. 录入区 (修复报错显示)
     with st.expander("➕ Manual Tax Record"):
         with st.form("t_rec"):
             cc1, cc2, cc3, cc4 = st.columns(4)
@@ -253,44 +278,30 @@ def main_app():
             td = st.date_input("DATE", datetime.date.today())
             
             if st.form_submit_button("ADD"):
-                # 第一步：先检查数字格式
                 try:
                     tq = float(tq_str)
                     tp = float(tp_str)
-                except ValueError:
-                    st.error("❌ 格式错误：请输入纯数字 (例如 0.002)")
-                    st.stop() # 停止执行，不进入下一步
-                
-                # 第二步：尝试写入数据库 (捕获真实错误)
-                try:
                     price_engine.add_transaction(supabase, user.id, ts, tt, tq, tp, td)
-                    st.success("Recorded")
-                    time.sleep(0.5); st.rerun()
+                    st.success("Recorded"); time.sleep(0.5); st.rerun()
                 except Exception as e:
                     st.error(f"❌ Database Error: {e}")
 
-    # 2. 获取数据
     tx_df = price_engine.get_transaction_history(supabase, user.id)
-    
     if not tx_df.empty:
-        # 计算税务
         calc = price_engine.TaxCalculator()
         realized, events = calc.calculate(tx_df)
         
-        # 顶部功能栏：清空按钮
-        col_info, col_clear = st.columns([3, 1])
-        with col_info:
-            st.markdown(f"**REALIZED P&L:** <span style='color:{'#00ff41' if realized>0 else '#ff003c'}'>${realized:,.2f}</span>", unsafe_allow_html=True)
-        with col_clear:
+        col_res, col_del = st.columns([3, 1])
+        with col_res:
+            st.markdown(f"<div style='color:#fff; margin-bottom:10px;'>REALIZED P&L: <span style='color:{'#00ff41' if realized>0 else '#ff003c'}'>${realized:,.2f}</span> (FIFO)</div>", unsafe_allow_html=True)
+        with col_del:
             if st.button("🗑️ CLEAR HISTORY"):
                 price_engine.clear_all_transactions(supabase, user.id)
                 st.success("Cleared"); time.sleep(0.5); st.rerun()
 
-        # 选项卡展示
-        tab_tax, tab_ledger = st.tabs(["💰 REALIZED P&L (Tax Events)", "📜 FULL LEDGER (Manage)"])
+        t1, t2 = st.tabs(["💰 TAX EVENTS", "📜 FULL LEDGER"])
         
-        # Tab 1: 税务事件 (只显示卖出结果)
-        with tab_tax:
+        with t1:
             if events:
                 for e in reversed(events[-5:]):
                     c = "#00ff41" if e['term']=="LONG" else "#ff003c"
@@ -301,51 +312,24 @@ def main_app():
                         <div><span style="background:{c}; color:#000; padding:2px 8px; border-radius:2px; font-weight:bold; font-size:0.8rem; margin-right:15px;">{tag}</span><span style="color:#8b949e">Gain:</span> <span style="color:{c}; font-weight:bold">${e['gain']:,.2f}</span></div>
                     </div>
                     """, unsafe_allow_html=True)
-            else:
-                st.info("No taxable events yet (You haven't sold anything).")
-
-        # Tab 2: 完整账本 (带删除功能！)
-        with tab_ledger:
-            st.caption("Click 'X' to delete a specific record.")
-            
-            # 遍历显示每一条记录，并加一个删除按钮
-            # 为了美观，我们用 st.columns 来模拟表格
-            
-            # 表头
-            h1, h2, h3, h4, h5, h6 = st.columns([2, 1, 1, 2, 2, 1])
-            h1.markdown("**Date**")
-            h2.markdown("**Type**")
-            h3.markdown("**Asset**")
-            h4.markdown("**Qty**")
-            h5.markdown("**Price**")
-            h6.markdown("**Action**")
-            st.divider()
-
-            # 列表内容 (倒序显示，最新的在上面)
-            # 注意：iterrows 性能较差，但对于几十条记录没问题
+            else: st.info("No taxable events yet.")
+        
+        with t2:
+            st.caption("Click X to delete specific record")
             for index, row in tx_df.sort_values('timestamp', ascending=False).iterrows():
-                c1, c2, c3, c4, c5, c6 = st.columns([2, 1, 1, 2, 2, 1])
-                
-                # 格式化日期
+                c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 2, 1])
                 ts_str = pd.to_datetime(row['timestamp']).strftime('%Y-%m-%d')
-                
                 c1.write(ts_str)
                 c2.write(row['type'])
-                c3.write(row['symbol'])
-                c4.write(f"{float(row['quantity']):.4f}")
-                c5.write(f"${float(row['price']):,.2f}")
-                
-                # 删除按钮 (使用唯一的 key 防止冲突)
-                if c6.button("❌", key=f"del_{row['id']}"):
-                    price_engine.delete_transaction(supabase, row['id'])
-                    st.toast("Deleted"); time.sleep(0.5); st.rerun()
-            
+                c3.write(f"{row['symbol']}")
+                c4.write(f"{float(row['quantity']):.4f} @ ${float(row['price']):,.0f}")
+                if c5.button("❌", key=f"del_{row['id']}"):
+                    price_engine.delete_transaction(supabase, row['id']); st.rerun()
     else:
-        st.info("No transaction history. Add a record above.")
+        st.info("No transaction history. Use SYNC LOG or Manual Add.")
 
     time.sleep(2)
     st.rerun()
-
 
 if __name__ == "__main__":
     if st.session_state.user: main_app()
