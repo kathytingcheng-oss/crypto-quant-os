@@ -11,7 +11,7 @@ import ccxt
 # ==========================================
 # 1. 页面配置与 CSS
 # ==========================================
-st.set_page_config(page_title="CRYPTO QUANT OS", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ASSET NEXUS", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -74,11 +74,16 @@ def render_hud(title, val, sub, theme="blue"):
 # ==========================================
 # 4. Login UI
 # ==========================================
+# ==========================================
+# 4. Login UI
+# ==========================================
 def login_ui():
     st.write(""); st.write("")
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        st.markdown("<h1 style='text-align:center; color:#00ff41; font-family:Orbitron; font-size: 3.5rem; text-shadow: 0 0 20px rgba(0,255,65,0.4);'>QUANT OS</h1>", unsafe_allow_html=True)
+        # UPDATED TITLE: ASSET NEXUS
+        st.markdown("<h1 style='text-align:center; color:#00ff41; font-family:Orbitron; font-size: 3.3rem; text-shadow: 0 0 20px rgba(0,255,65,0.4);'>ASSET NEXUS</h1>", unsafe_allow_html=True)
+
         with st.container():
             st.markdown('<div class="login-container">', unsafe_allow_html=True)
             tab1, tab2 = st.tabs(["🔒 LOGIN", "📝 REGISTER"])
@@ -254,13 +259,44 @@ def main_app():
     with c_right:
         st.markdown("#### 🍩 ALLOCATION")
         if not df.empty:
+            # 1. 布局设置
             fig = go.Figure(data=[go.Pie(labels=df['Symbol'], values=df['Current Value'], hole=.6)])
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False, margin=dict(t=0,b=0,l=0,r=0), height=300)
             
-            # 🔥 核心修改：添加 opacity=0.8 实现透明发光效果
+            fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)', 
+                plot_bgcolor='rgba(0,0,0,0)', 
+                showlegend=False, 
+                margin=dict(t=0,b=0,l=0,r=0), 
+                height=300
+            )
+            
+            # 🎨 THEME: ENERGY BAR GRADIENT (能量条渐变)
+            # 参考了你的进度条截图：带有青色调的荧光绿 -> 纯绿 -> 深绿
+            # 这种渐变比纯绿更洋气，有一种“充能”的感觉
+            energy_gradient = [
+                '#5affd6',  # 进度条最亮端的青绿色 (Cyan Green)
+                '#00ff41',  # 你的按钮标准绿 (Button Green)
+                '#00d135',  # 中绿
+                '#00a329',  # 深绿
+                '#00751d'   # 暗绿
+            ]
+            
             fig.update_traces(
-                marker=dict(colors=['#00f3ff', '#bd00ff', '#0066ff', '#00ff41', '#00c3ff']),
-                opacity=0.8 
+                textinfo='percent+label', 
+                
+                # 🔥 字体颜色 🔥
+                # 极深的墨绿色 (接近黑色)，对比度最高
+                textfont=dict(family="Arial Black", size=14, color='#001a05'),
+                
+                textposition='inside',
+                
+                # 🔥 视觉质感 🔥
+                opacity=1.0,  # 保持高亮实心，还原进度条的实感
+                marker=dict(
+                    colors=energy_gradient, 
+                    # 黑色边框，保持硬朗
+                    line=dict(color='#000000', width=2) 
+                )
             )
             
             st.plotly_chart(fig, use_container_width=True)
