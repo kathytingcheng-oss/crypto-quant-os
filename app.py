@@ -49,16 +49,34 @@ st.markdown("""
 # ==========================================
 # 2. 初始化
 # ==========================================
+# --- Part A: Database Connection ---
 try:
-    SUPABASE_URL = os.environ.get("SUPABASE_URL") or st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or st.secrets["SUPABASE_KEY"]
-    
+    # 1. Try Render Environment Variables first
+    SUPABASE_URL = os.environ.get("SUPABASE_URL")
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+    # 2. If missing, try Local secrets.toml
+    if not SUPABASE_URL:
+        try: SUPABASE_URL = st.secrets["SUPABASE_URL"]
+        except: pass
+            
+    if not SUPABASE_KEY:
+        try: SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+        except: pass
+
+    # 3. Validation
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        st.error("❌ Configuration Error: Missing SUPABASE_URL or SUPABASE_KEY. Please check Render Environment Variables or local secrets.toml.")
+        st.stop()
+
+    # 4. Connect
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 except Exception as e:
-    st.error(f"数据库连接失败: {e}")
+    st.error(f"Database Connection Error: {e}")
     st.stop()
 
-# --- [修复] 初始化 session_state ---
+# --- Part B: Session State Initialization (Fixing your error) ---
 if 'user' not in st.session_state:
     st.session_state.user = None
 
