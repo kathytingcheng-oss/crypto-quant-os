@@ -7,6 +7,7 @@ import extra_streamlit_components as stx
 from supabase import create_client, Client
 import price_engine
 import ccxt
+import os
 
 # ==========================================
 # 1. 页面配置与 CSS
@@ -49,15 +50,23 @@ st.markdown("""
 # 2. 初始化
 # ==========================================
 try:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    SUPABASE_URL = os.environ.get("SUPABASE_URL") or st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or st.secrets["SUPABASE_KEY"]
+    
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-except: st.stop()
+except Exception as e:
+    st.error(f"数据库连接失败: {e}")
+    st.stop()
 
-if 'user' not in st.session_state: st.session_state.user = None
+# --- [修复] 初始化 session_state ---
+if 'user' not in st.session_state:
+    st.session_state.user = None
+
 if 'session' in st.session_state:
-    try: supabase.auth.set_session(st.session_state.session.access_token, st.session_state.session.refresh_token)
-    except: del st.session_state.session
+    try:
+        supabase.auth.set_session(st.session_state.session.access_token, st.session_state.session.refresh_token)
+    except:
+        del st.session_state.session
 
 # ==========================================
 # 3. 辅助函数
@@ -74,14 +83,10 @@ def render_hud(title, val, sub, theme="blue"):
 # ==========================================
 # 4. Login UI
 # ==========================================
-# ==========================================
-# 4. Login UI
-# ==========================================
 def login_ui():
     st.write(""); st.write("")
     c1, c2, c3 = st.columns([1, 1.2, 1])
     with c2:
-        # UPDATED TITLE: ASSET NEXUS
         st.markdown("<h1 style='text-align:center; color:#00ff41; font-family:Orbitron; font-size: 3.3rem; text-shadow: 0 0 20px rgba(0,255,65,0.4);'>ASSET NEXUS</h1>", unsafe_allow_html=True)
 
         with st.container():
@@ -105,35 +110,28 @@ def login_ui():
 
 
 # ==========================================
-# 5. Main App
+# 5. Main App (使用 @st.fragment)
 # ==========================================
 def main_app():
     user = st.session_state.user
     cookie_manager = stx.CookieManager()
     cookies = cookie_manager.get_all()
     
-    market = price_engine.get_market_data_instance()
-    raw = price_engine.get_user_portfolio(supabase)
-    df = price_engine.calculate_dashboard_data(raw, market)
-    
-    # 核心计算
-    val = df['Current Value'].sum() if not df.empty else 0
-    cost = (df['Amount'] * df['Avg Buy Price']).sum() if not df.empty else 0
-    pnl = val - cost
-    pct = (pnl/cost*100) if cost>0 else 0
-    goal = price_engine.get_user_goal(supabase, user.id)
-    goal_pct = min((val/goal*100), 100) if goal>0 else 0
-    est_tax = max(pnl * (st.session_state.get('tax_rate', 30.0)/100), 0)
+    # 第一次获取数据（主要为了给 Sidebar 使用）
+    try:
+        market_static = price_engine.get_market_data_instance()
+        raw_static = price_engine.get_user_portfolio(supabase)
+        df_static = price_engine.calculate_dashboard_data(raw_static, market_static)
+    except:
+        df_static = pd.DataFrame()
 
-    # --- Sidebar (侧边栏布局) ---
+    # --- Sidebar (静态) ---
     with st.sidebar:
         st.markdown("### ⚙ CONTROL PANEL")
         
-        # 1. 模式选择 (Mode Selection)
         mode = st.radio("MODE", ["MANUAL ENTRY", "AUTO SYNC (API)"])
         st.divider()
         
-        # 2. 数据源输入 (Input Section)
         if mode == "MANUAL ENTRY":
             st.caption("📝 Add/Update Holdings")
             with st.form("manual"):
@@ -143,8 +141,7 @@ def main_app():
                 
                 if st.form_submit_button("SAVE ASSET"):
                     try:
-                        amt = float(amt_str)
-                        avg = float(avg_str)
+                        amt = float(amt_str); avg = float(avg_str)
                         price_engine.upsert_user_asset(supabase, user.id, sym, amt, avg)
                         st.toast("Asset Saved"); time.sleep(0.5); st.rerun()
                     except: st.error("Invalid Number")
@@ -153,6 +150,7 @@ def main_app():
             st.caption("🔗 Exchange Connection")
             exchange = st.selectbox("EXCHANGE", ["binance", "okx", "bybit", "kraken", "kucoin", "bitget", "gate"])
             c_key = cookies.get(f"{exchange}_key", ""); c_sec = cookies.get(f"{exchange}_sec", ""); c_pass = cookies.get(f"{exchange}_pass", "")
+            
             api_key = st.text_input("API Key", value=str(c_key), type="password")
             api_sec = st.text_input("Secret Key", value=str(c_sec), type="password")
             password = None
@@ -161,6 +159,7 @@ def main_app():
                 password = st.text_input("Passphrase", value=str(c_pass) if c_pass else "", type="password")
             
             remember = st.checkbox("Remember Keys")
+            
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("SYNC BAL"):
@@ -169,24 +168,23 @@ def main_app():
                         cookie_manager.set(f"{exchange}_key", api_key, expires_at=exp)
                         cookie_manager.set(f"{exchange}_sec", api_sec, expires_at=exp)
                         if password: cookie_manager.set(f"{exchange}_pass", password, expires_at=exp)
-                    with st.spinner("Updating..."):
+                    with st.spinner("Connecting..."):
                         ok, msg = price_engine.sync_exchange_holdings(supabase, user.id, exchange, api_key, api_sec, password)
                         if ok: st.success("Updated"); time.sleep(1); st.rerun()
                         else: st.error(msg)
             with col2:
                 if st.button("SYNC LOG"):
-                    with st.spinner("Fetching..."):
+                    with st.spinner("Fetching Log..."):
                         ok, msg = price_engine.sync_history_log(supabase, user.id, exchange, api_key, api_sec, password)
                         if ok: st.success("Done"); time.sleep(1); st.rerun()
                         else: st.error(msg)
-            if st.button("Clear Keys"):
+            if st.button("Clear Saved Keys"):
                 cookie_manager.delete(f"{exchange}_key"); cookie_manager.delete(f"{exchange}_sec"); 
                 if password: cookie_manager.delete(f"{exchange}_pass")
                 st.rerun()
 
         st.divider()
 
-        # 3. 目标与税务 (Tax & Goal) - 固定位置
         with st.expander("🎯 TAX & GOAL", expanded=False):
             cur = price_engine.get_user_goal(supabase, user.id)
             new = st.number_input("Target $", value=float(cur), step=5000.0)
@@ -194,9 +192,8 @@ def main_app():
             st.session_state.tax_rate = st.slider("Tax Rate %", 0.0, 50.0, st.session_state.tax_rate)
             if st.button("SAVE GOAL"): price_engine.upsert_user_goal(supabase, user.id, new); st.rerun()
 
-        # 4. 资产管理 (Manage Assets) - 确保只在这里出现，且在Tax下方
         with st.expander("🗑️ MANAGE ASSETS", expanded=False):
-            asset_list = [row['Symbol'] for row in df.to_dict('records')] if not df.empty else []
+            asset_list = [row['Symbol'] for row in df_static.to_dict('records')] if not df_static.empty else []
             if asset_list:
                 to_del = st.selectbox("Select Asset to Delete", asset_list)
                 if st.button(f"DELETE {to_del}", type="secondary"):
@@ -211,74 +208,90 @@ def main_app():
         st.write("")
         if st.button("LOGOUT"): supabase.auth.sign_out(); st.session_state.user = None; st.rerun()
 
-    # --- Dashboard UI (右侧主界面) ---
-    st.markdown("### 📡 SYSTEM STATUS: ONLINE")
-    c1, c2, c3 = st.columns(3)
-    with c1: st.markdown(render_hud("NET WORTH", f"${val:,.2f}", "TOTAL ASSETS", "blue"), unsafe_allow_html=True)
-    with c2: st.markdown(render_hud("24H P&L", f"${pnl:,.2f}", f"{pct:+.2f}%", "green" if pnl>=0 else "red"), unsafe_allow_html=True)
-    with c3: 
-        t_c = "red" if est_tax > 0 else "green"
-        st.markdown(render_hud("EST. TAX BILL", f"${est_tax:,.2f}", "LIABILITY ALERT", t_c), unsafe_allow_html=True)
+    # =========================================================
+    #  🔥 局部刷新区域 (Fragment)
+    # =========================================================
+    @st.fragment(run_every=10)
+    def live_dashboard_panel():
+        try:
+            m_data = price_engine.get_market_data_instance()
+            raw_data = price_engine.get_user_portfolio(supabase)
+            df = price_engine.calculate_dashboard_data(raw_data, m_data)
+        except:
+            df = pd.DataFrame()
+
+        val = df['Current Value'].sum() if not df.empty else 0
+        cost = (df['Amount'] * df['Avg Buy Price']).sum() if not df.empty else 0
+        pnl = val - cost
+        pct = (pnl/cost*100) if cost>0 else 0
+        goal = price_engine.get_user_goal(supabase, user.id)
+        goal_pct = min((val/goal*100), 100) if goal>0 else 0
+        est_tax = max(pnl * (st.session_state.get('tax_rate', 30.0)/100), 0)
+
+        st.markdown("### 📡 SYSTEM STATUS: ONLINE (AUTO-SYNCING)")
+        
+        c1, c2, c3 = st.columns(3)
+        with c1: st.markdown(render_hud("NET WORTH", f"${val:,.2f}", "TOTAL ASSETS", "blue"), unsafe_allow_html=True)
+        with c2: st.markdown(render_hud("24H P&L", f"${pnl:,.2f}", f"{pct:+.2f}%", "green" if pnl>=0 else "red"), unsafe_allow_html=True)
+        with c3: 
+            t_c = "red" if est_tax > 0 else "green"
+            st.markdown(render_hud("EST. TAX BILL", f"${est_tax:,.2f}", "LIABILITY ALERT", t_c), unsafe_allow_html=True)
+        
+        st.markdown(f"""
+        <div style="margin-top:15px; margin-bottom:10px; display:flex; justify-content:space-between; font-size:0.8rem; color:#8b949e;">
+            <span>YTD COMPLETION</span><span style="color:#00ff41">{goal_pct:.1f}%</span>
+        </div>
+        <div style="margin-bottom:30px; background:#21262d; height:10px; border-radius:5px; overflow:hidden;">
+            <div style="width:{goal_pct}%; background:linear-gradient(90deg, #00f3ff, #00ff41); height:100%; box-shadow: 0 0 10px rgba(0, 255, 65, 0.5);"></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        c_left, c_right = st.columns([2, 1])
+        with c_left:
+            st.markdown("#### 📊 LIVE POSITIONS")
+            if not df.empty:
+                def color_pnl(val):
+                    color = '#00ff41' if val >= 0 else '#ff003c'
+                    return f'color: {color}; font-weight: bold;'
+
+                styled_df = df.style.format({
+                    "Amount": "{:.4f}",
+                    "Avg Buy Price": "${:,.2f}",
+                    "Current Price": "${:,.2f}",
+                    "Current Value": "${:,.2f}",
+                    "P&L %": "{:+.2f}%"
+                }).map(color_pnl, subset=['P&L %'])
+
+                st.dataframe(
+                    styled_df,
+                    column_order=['Symbol', 'Amount', 'Avg Buy Price', 'Current Price', 'Current Value', 'P&L %'],
+                    hide_index=True, 
+                    use_container_width=True,
+                    height=400,
+                    column_config={
+                        "Symbol": "Asset", "Amount": "Holdings", "Avg Buy Price": "Avg Buy",
+                        "Current Price": "Price", "Current Value": "Value", "P&L %": "Performance"
+                    }
+                )
+            else: st.info("Waiting for data / No Assets...")
+
+        with c_right:
+            st.markdown("#### 🍩 ALLOCATION")
+            if not df.empty:
+                fig = go.Figure(data=[go.Pie(labels=df['Symbol'], values=df['Current Value'], hole=.6)])
+                fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False, margin=dict(t=0,b=0,l=0,r=0), height=300)
+                energy_gradient = ['#5affd6', '#00ff41', '#00d135', '#00a329', '#00751d']
+                fig.update_traces(
+                    textinfo='percent+label', 
+                    textfont=dict(family="Arial Black", size=14, color='#001a05'),
+                    textposition='inside',
+                    opacity=1.0,
+                    marker=dict(colors=energy_gradient, line=dict(color='#000000', width=2))
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+    live_dashboard_panel()
     
-    st.markdown(f"""
-    <div style="margin-top:15px; margin-bottom:10px; display:flex; justify-content:space-between; font-size:0.8rem; color:#8b949e;">
-        <span>YTD COMPLETION</span><span style="color:#00ff41">{goal_pct:.1f}%</span>
-    </div>
-    <div style="margin-bottom:30px; background:#21262d; height:10px; border-radius:5px; overflow:hidden;">
-        <div style="width:{goal_pct}%; background:linear-gradient(90deg, #00f3ff, #00ff41); height:100%; box-shadow: 0 0 10px rgba(0, 255, 65, 0.5);"></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # --- Table & Charts ---
-    c_left, c_right = st.columns([2, 1])
-    
-    with c_left:
-        st.markdown("#### 📊 LIVE POSITIONS")
-        if not df.empty:
-            def color_pnl(val):
-                color = '#00ff41' if val >= 0 else '#ff003c'
-                return f'color: {color}; font-weight: bold;'
-
-            styled_df = df.style.format({
-                "Amount": "{:.4f}",
-                "Avg Buy Price": "${:,.2f}",
-                "Current Price": "${:,.2f}",
-                "Current Value": "${:,.2f}",
-                "P&L %": "{:+.2f}%"
-            }).map(color_pnl, subset=['P&L %'])
-
-            st.dataframe(
-                styled_df,
-                column_order=['Symbol', 'Amount', 'Avg Buy Price', 'Current Price', 'Current Value', 'P&L %'],
-                hide_index=True, 
-                use_container_width=True,
-                height=400,
-                column_config={
-                    "Symbol": "Asset", "Amount": "Holdings", "Avg Buy Price": "Avg Buy",
-                    "Current Price": "Price", "Current Value": "Value", "P&L %": "Performance"
-                }
-            )
-        else: st.info("Waiting for data...")
-
-    with c_right:
-        st.markdown("#### 🍩 ALLOCATION")
-        if not df.empty:
-            fig = go.Figure(data=[go.Pie(labels=df['Symbol'], values=df['Current Value'], hole=.6)])
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False, margin=dict(t=0,b=0,l=0,r=0), height=300)
-            
-            # 🎨 THEME: ENERGY BAR GRADIENT
-            energy_gradient = ['#5affd6', '#00ff41', '#00d135', '#00a329', '#00751d']
-            
-            fig.update_traces(
-                textinfo='percent+label', 
-                textfont=dict(family="Arial Black", size=14, color='#001a05'),
-                textposition='inside',
-                opacity=1.0,
-                marker=dict(colors=energy_gradient, line=dict(color='#000000', width=2))
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    # --- Tax Engine ---
     st.markdown("---"); st.markdown("### 🏛 THE TAX ENGINE")
     
     with st.expander("➕ Manual Tax Record"):
@@ -331,10 +344,7 @@ def main_app():
                 c1.write(ts_str); c2.write(row['type']); c3.write(f"{row['symbol']}"); c4.write(f"{float(row['quantity']):.4f} @ ${float(row['price']):,.0f}")
                 if c5.button("❌", key=f"del_{row['id']}"): price_engine.delete_transaction(supabase, row['id']); st.rerun()
     else:
-        st.info("No transaction history. Use SYNC LOG or Manual Add.")
-
-    time.sleep(2)
-    st.rerun()
+        st.info("No transaction history.")
 
 if __name__ == "__main__":
     if st.session_state.user: main_app()
